@@ -1,5 +1,7 @@
 # Meet for Me (free, local)
 
+*[Hướng dẫn tiếng Việt](README.vi.md)*
+
 Listens to Zoom audio on your Mac, transcribes it locally with Whisper, and when someone
 asks *you* something, shows a macOS notification with the question and a drafted answer.
 
@@ -182,9 +184,9 @@ Then set `"llm_backend": "ollama"` in config.json.
   Clips with under 0.5 s of sound are skipped, and invented lines are dropped: low-confidence
   output, repetition loops, known YouTube phrases, echoes of the hint text, and wrong scripts.
   Dropped lines are printed as `(dropped: …)` in the engine log (`logs/engine.log`).
+  Add any other phrase you see to `HALLUCINATION_PHRASES` in listener.py.
 - **Your own voice never appears:** only what Zoom plays (other people) goes through
-  BlackHole. To test alone, join from a second device or play audio into the meeting. Add any other phrase you see
-  to `HALLUCINATION_PHRASES` in listener.py.
+  BlackHole. To test alone, join from a second device or play audio into the meeting.
 
 ## Tuning
 - Lines not detected → lower `silence_threshold` (e.g. 0.003). Too many fragments → raise it.
