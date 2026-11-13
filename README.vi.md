@@ -47,6 +47,13 @@ Lần chạy đầu, app tải model Whisper (khoảng 1,6 GB) nên sẽ hơi l�
 
 ## 3. Thiết lập âm thanh (chỉ làm một lần)
 
+> **Lần đầu mở app**, một **hướng dẫn thiết lập** từng bước sẽ hiện ra: đặt tên của bạn, rồi
+> kiểm tra từng mục: BlackHole, Multi-Output Device (app kiểm tra BlackHole đã được tick bên
+> trong chưa), đầu ra âm thanh của Mac, quyền Microphone và thông báo, engine và Claude CLI.
+> Mỗi mục hiện **Done** (đã xong), **Need setup** (cần thiết lập) hoặc **Recommended** (nên làm),
+> kèm nút **How to fix** chỉ cách sửa. Danh sách tự cập nhật mỗi 2 giây. Bạn có thể xem lại bất
+> cứ lúc nào ở tab **Setup**. Các bước thủ công bên dưới chỉ để tham khảo.
+
 App cần "nghe" được âm thanh cuộc họp. Ta dùng **BlackHole**, một thiết bị âm thanh ảo miễn
 phí, để sao chép âm thanh Zoom cho app, trong khi bạn vẫn nghe bình thường.
 
@@ -195,6 +202,7 @@ xưng "anh", gọi người hỏi là "em". Câu trả lời không nhắc đế
 |---|---|
 | Không thấy thông báo của macOS | Có thể đang bật **Focus / Do Not Disturb** (macOS cũng tự bật khi chia sẻ màn hình). Thẻ cảnh báo nổi của app vẫn hiện. Muốn thông báo macOS cũng hiện: thêm *Meet for Me* vào Allowed Apps của Focus. |
 | Transcript trống | Âm thanh chưa vào BlackHole. Kiểm tra mục 3.3 (Output hoặc Speaker phải là **Multi-Output Device**). App hiện dải cam khi Output sai, và gửi thông báo nếu 45 giây không có âm thanh. |
+| Âm thanh khác (YouTube, nhạc…) cũng bị ghi | Khi Output của Mac là Multi-Output Device, mọi âm thanh trên máy đều bị ghi. Nếu dùng Zoom/Teams app, chỉ đặt **Speaker của app** là Multi-Output Device và để Output của Mac là loa, như vậy âm thanh khác sẽ không bị ghi. |
 | Không thấy giọng của chính mình | Bình thường. App chỉ nghe được người khác (Zoom không phát lại giọng của bạn). Muốn tự thử, hãy vào họp thêm bằng điện thoại và nói từ đó. |
 | App mở nhưng không nghe | Có thể chưa cấp quyền Microphone/Documents. Xem System Settings → Privacy & Security → **Microphone** và **Files and Folders**. |
 | Xuất hiện câu lạ như "Cảm ơn các bạn đã theo dõi", "Gi Gi Gi…" | Whisper "bịa" chữ khi chỉ có tiếng ồn. App tự lọc các câu này. Nếu gặp câu lạ khác, thêm vào `HALLUCINATION_PHRASES` trong `listener.py`. |

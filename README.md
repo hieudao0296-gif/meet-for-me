@@ -26,6 +26,9 @@ and your notes to `context.md`. Both are created locally and git-ignored, as are
 
 ## One-time setup
 
+The app's setup guide walks you through all of this and checks each step. The manual
+steps are below for reference.
+
 1. **Install BlackHole** (free virtual audio device; asks for your password):
    ```
    brew install --cask blackhole-2ch
@@ -130,6 +133,12 @@ Test the answering without audio by feeding a text transcript, one line per utte
 
 `app/build/Meet for Me.app` is a small native front end for `listener.py`:
 
+- **Setup guide** on first launch: your name(s), then a live checklist for BlackHole,
+  the Multi-Output Device (it checks BlackHole is actually ticked in it), the Mac sound
+  output, Microphone and Notifications access, the engine and the Claude CLI. Each item
+  shows **Done**, **Need setup** or **Recommended**, with "How to fix" steps. The
+  **Setup** tab re-runs the checks at any time (also on every launch); missing items
+  show an orange bar under the status line.
 - **Floating alerts:** a card in the top-right corner for each question (with the drafted
   answer and a copy button), "someone called you", name mentions and "no meeting audio".
   It shows even when Focus / Do Not Disturb is on, and it's **hidden from screen sharing
@@ -190,6 +199,10 @@ Then set `"llm_backend": "ollama"` in config.json.
   output, repetition loops, known YouTube phrases, echoes of the hint text, and wrong scripts.
   Dropped lines are printed as `(dropped: …)` in the engine log (`logs/engine.log`).
   Add any other phrase you see to `HALLUCINATION_PHRASES` in listener.py.
+- **Other sounds get transcribed too (YouTube, music):** with the Mac output set to
+  Multi-Output Device, everything the Mac plays is captured. If you use the Zoom/Teams
+  app, set only *its* Speaker to Multi-Output Device and leave the Mac output on your
+  speakers, so other sounds stay out.
 - **Your own voice never appears:** only what Zoom plays (other people) goes through
   BlackHole. To test alone, join from a second device or play audio into the meeting.
 

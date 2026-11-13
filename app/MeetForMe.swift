@@ -80,6 +80,397 @@ func outputReachesBlackHole(_ name: String?) -> Bool {
     return n.contains("multi-output") || n.contains("blackhole")
 }
 
+// MARK: - Setup checks (BlackHole, Multi-Output, output, permissions, engine)
+
+enum AudioDevices {
+    static func all() -> [AudioDeviceID] {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices,
+                                              mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr
+        else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr
+        else { return [] }
+        return ids
+    }
+
+    static func cfProperty(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> CFTypeRef? {
+        var addr = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var value: Unmanaged<CFTypeRef>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFTypeRef>?>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &value) == noErr else { return nil }
+        return value?.takeRetainedValue()
+    }
+
+    static func name(_ id: AudioDeviceID) -> String { cfProperty(id, kAudioObjectPropertyName) as? String ?? "" }
+    static func uid(_ id: AudioDeviceID) -> String { cfProperty(id, kAudioDevicePropertyDeviceUID) as? String ?? "" }
+    static func subDeviceUIDs(_ id: AudioDeviceID) -> [String] {
+        cfProperty(id, kAudioAggregateDevicePropertyFullSubDeviceList) as? [String] ?? []
+    }
+
+    static func isAggregate(_ id: AudioDeviceID) -> Bool {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+                                              mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var t: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &t) == noErr else { return false }
+        return t == kAudioDeviceTransportTypeAggregate
+    }
+
+    static func defaultOutput() -> AudioDeviceID? {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+                                              mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        var dev = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil,
+                                         &size, &dev) == noErr else { return nil }
+        return dev
+    }
+}
+
+struct SetupCheck: Identifiable {
+    enum ID: String { case name, blackhole, multiOutput, output, microphone, notifications, engine, claude }
+    let id: ID
+    let title: String
+    let ok: Bool
+    let detail: String
+    var optional = false   // "recommended" instead of "required"
+}
+
+@MainActor
+final class SetupChecker: ObservableObject {
+    @Published var checks: [SetupCheck] = []
+    @Published var notificationsAllowed: Bool? = nil
+
+    var needSetup: [SetupCheck] { checks.filter { !$0.ok && !$0.optional } }
+
+    func refresh(_ engine: Engine) {
+        var out: [SetupCheck] = []
+
+        // Name
+        var names: [String] = []
+        if let d = try? Data(contentsOf: engine.configURL),
+           let cfg = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+            names = cfg["my_names"] as? [String] ?? []
+        }
+        out.append(SetupCheck(id: .name, title: "Your name", ok: !names.isEmpty,
+                              detail: names.isEmpty ? "Not set: the app can't tell when you're called."
+                                                    : "Listening for: " + names.joined(separator: ", ")))
+
+        // Audio devices
+        let devices = AudioDevices.all()
+        let blackhole = devices.first { AudioDevices.name($0).lowercased().contains("blackhole") }
+        out.append(SetupCheck(id: .blackhole, title: "BlackHole installed", ok: blackhole != nil,
+                              detail: blackhole != nil ? "Found \u{201C}\(AudioDevices.name(blackhole!))\u{201D}."
+                                                       : "Virtual audio device not found."))
+        let bhUID = blackhole.map(AudioDevices.uid) ?? "-"
+        let multi = devices.first { AudioDevices.isAggregate($0) && AudioDevices.subDeviceUIDs($0).contains(bhUID) }
+        let anyMulti = devices.first { AudioDevices.name($0).lowercased().contains("multi-output") }
+        let multiDetail: String
+        if let multi {
+            multiDetail = "\u{201C}\(AudioDevices.name(multi))\u{201D} includes BlackHole."
+        } else if anyMulti != nil {
+            multiDetail = "A Multi-Output Device exists but BlackHole isn't ticked in it."
+        } else {
+            multiDetail = "No Multi-Output Device with BlackHole yet."
+        }
+        out.append(SetupCheck(id: .multiOutput, title: "Multi-Output Device", ok: multi != nil, detail: multiDetail))
+
+        let current = AudioDevices.defaultOutput()
+        let outOK = current != nil && (current == multi || current == blackhole)
+        out.append(SetupCheck(id: .output, title: "Mac sound output", ok: outOK,
+                              detail: outOK ? "Set to \u{201C}\(AudioDevices.name(current!))\u{201D}."
+                              : "Is \u{201C}\(current.map(AudioDevices.name) ?? "unknown")\u{201D}. Needed for meetings in a browser; "
+                                + "for the Zoom/Teams app set its Speaker to Multi-Output Device instead.",
+                              optional: true))
+
+        // Permissions
+        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+        out.append(SetupCheck(id: .microphone, title: "Microphone access", ok: mic == .authorized,
+                              detail: mic == .authorized ? "Allowed (used only to read BlackHole)."
+                              : mic == .notDetermined ? "Not asked yet." : "Denied: allow it in System Settings."))
+        let notif = notificationsAllowed
+        out.append(SetupCheck(id: .notifications, title: "Notifications", ok: notif == true,
+                              detail: notif == true ? "Allowed."
+                              : "Not allowed: you'll still get the floating alert cards.",
+                              optional: true))
+
+        // Engine + Claude
+        let missing = engine.engineMissing
+        out.append(SetupCheck(id: .engine, title: "Listener engine", ok: missing == nil,
+                              detail: missing ?? "Found in \(engine.folderPath)."))
+        let claude = Engine.environment["PATH", default: ""].split(separator: ":")
+            .map { "\($0)/claude" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+        out.append(SetupCheck(id: .claude, title: "Claude Code CLI", ok: claude != nil,
+                              detail: claude != nil ? "Found at \(claude!)."
+                                                    : "`claude` not found: drafted answers and chat need it."))
+        checks = out
+
+        UNUserNotificationCenter.current().getNotificationSettings { s in
+            let allowed = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+            Task { @MainActor in
+                if self.notificationsAllowed != allowed {
+                    self.notificationsAllowed = allowed
+                    self.refresh(engine)
+                }
+            }
+        }
+    }
+}
+
+struct CopyCommand: View {
+    let command: String
+    var body: some View {
+        HStack {
+            Text(command).font(.callout.monospaced()).textSelection(.enabled)
+            Spacer()
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+            } label: { Label("Copy", systemImage: "doc.on.doc") }
+            .buttonStyle(.borderless)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(0.06)))
+    }
+}
+
+struct SetupRow: View {
+    let check: SetupCheck
+    @ObservedObject var checker: SetupChecker
+    let engine: Engine
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: check.ok ? "checkmark.circle.fill"
+                      : (check.optional ? "exclamationmark.circle" : "exclamationmark.triangle.fill"))
+                    .foregroundStyle(check.ok ? .green : (check.optional ? .secondary : .orange))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(check.title).font(.headline)
+                    Text(check.detail).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Text(check.ok ? "Done" : (check.optional ? "Recommended" : "Need setup"))
+                    .font(.caption.bold())
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill((check.ok ? Color.green : (check.optional ? Color.gray : Color.orange)).opacity(0.18)))
+                if !check.ok {
+                    Button(expanded ? "Hide" : "How to fix") { expanded.toggle() }
+                        .buttonStyle(.borderless)
+                }
+            }
+            if expanded && !check.ok { fix.padding(.leading, 28) }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder private var fix: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch check.id {
+            case .name:
+                Text("Go to the previous step of the guide, or Settings → Your name.")
+            case .blackhole:
+                Text("1. Run this in Terminal (it asks for your Mac password):")
+                CopyCommand(command: "brew install --cask blackhole-2ch")
+                Text("2. Then restart your Mac, or run:")
+                CopyCommand(command: "sudo killall coreaudiod")
+                Text("No Homebrew? Install it from brew.sh first.").font(.caption).foregroundStyle(.secondary)
+            case .multiOutput:
+                Text("1. Open Audio MIDI Setup.\n2. Click + (bottom left) → Create Multi-Output Device.\n3. Tick your speakers or headphones first, then BlackHole 2ch.\n4. Tick Drift Correction on the BlackHole row.")
+                Button("Open Audio MIDI Setup") {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Audio MIDI Setup.app"))
+                }
+            case .output:
+                Text("Meeting in a browser (Google Meet, Zoom/Teams on the web): set the Mac's Sound → Output to Multi-Output Device.\nZoom or Teams app: in the app's audio settings, set Speaker to Multi-Output Device (then this item can stay as is).")
+                Button("Open Sound Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension")!)
+                }
+            case .microphone:
+                Text("The app reads meeting audio from BlackHole, which macOS treats as a microphone.")
+                if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                    Button("Allow microphone access") {
+                        AVCaptureDevice.requestAccess(for: .audio) { _ in
+                            Task { @MainActor in checker.refresh(engine) }
+                        }
+                    }
+                } else {
+                    Button("Open Privacy → Microphone") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                    }
+                }
+            case .notifications:
+                Button("Allow notifications") {
+                    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+                        Task { @MainActor in checker.notificationsAllowed = nil; checker.refresh(engine) }
+                    }
+                }
+                Button("Open Notification Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+                }
+            case .engine:
+                Text("Install the engine (see README), then point the app to its folder in Settings → Engine:")
+                CopyCommand(command: "python3 -m venv .venv && .venv/bin/pip install -r requirements.txt")
+            case .claude:
+                Text("Install Claude Code and log in, then reopen this check:")
+                CopyCommand(command: "npm install -g @anthropic-ai/claude-code && claude")
+            }
+        }
+        .font(.callout)
+    }
+}
+
+/// The checklist, used in the setup guide and in the Setup tab. Re-checks every 2 seconds.
+struct SetupChecklist: View {
+    @ObservedObject var checker: SetupChecker
+    let engine: Engine
+    var only: [SetupCheck.ID]? = nil
+    private let timer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(checker.checks.filter { only == nil || only!.contains($0.id) }) { c in
+                SetupRow(check: c, checker: checker, engine: engine)
+                Divider()
+            }
+        }
+        .onAppear { checker.refresh(engine) }
+        .onReceive(timer) { _ in checker.refresh(engine) }
+    }
+}
+
+struct SetupTab: View {
+    @ObservedObject var engine: Engine
+    @ObservedObject var checker: SetupChecker
+    let openGuide: () -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("Setup check").font(.title2.bold())
+                        Text(checker.needSetup.isEmpty ? "Everything required is set up."
+                             : "\(checker.needSetup.count) item(s) need setup.")
+                            .foregroundStyle(checker.needSetup.isEmpty ? .green : .orange)
+                    }
+                    Spacer()
+                    Button("Open setup guide…", action: openGuide)
+                }
+                SetupChecklist(checker: checker, engine: engine)
+            }
+            .padding(16)
+        }
+    }
+}
+
+/// First-launch guide: welcome → your name → audio & permissions → done.
+struct OnboardingView: View {
+    @ObservedObject var engine: Engine
+    @ObservedObject var checker: SetupChecker
+    let finish: () -> Void
+    @StateObject private var s = SettingsModel()
+    @State private var step = 0
+    private let titles = ["Welcome", "Your name", "Audio setup", "Permissions", "All set"]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                ForEach(0..<titles.count, id: \.self) { i in
+                    Capsule().fill(i <= step ? Color.accentColor : Color.secondary.opacity(0.25))
+                        .frame(height: 4)
+                }
+            }
+            .padding([.horizontal, .top], 20)
+            Text("Step \(step + 1) of \(titles.count): \(titles[step])")
+                .font(.caption).foregroundStyle(.secondary).padding(.top, 6)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) { content }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+            HStack {
+                if step > 0 { Button("Back") { step -= 1 } }
+                Spacer()
+                if step < titles.count - 1 {
+                    Button("Skip setup") { finish() }.buttonStyle(.borderless)
+                }
+                Button(step == titles.count - 1 ? "Start using Meet for Me" : "Continue") { next() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(step == 1 && s.names.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(16)
+        }
+        .frame(width: 640, height: 600)
+        .onAppear { s.load(from: engine); checker.refresh(engine) }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch step {
+        case 0:
+            Text("Welcome to Meet for Me").font(.largeTitle.bold())
+            Text("Meet for Me listens to your meetings (Zoom, Google Meet, Teams) on this Mac, transcribes them locally, and alerts you when someone asks **you** a question, with a drafted answer based on what was said in the meeting.")
+            Label("Audio is transcribed on this Mac. Only the relevant transcript is sent to Claude to draft answers and for chat.", systemImage: "lock.shield")
+            Label("Recording colleagues may need their consent. Tell people when you use it.", systemImage: "exclamationmark.bubble")
+            Text("Setup takes about 5 minutes: your name, then a one-time audio setup.").foregroundStyle(.secondary)
+        case 1:
+            Text("What do people call you?").font(.title.bold())
+            Text("The app alerts you when it hears one of these names. Write Vietnamese names **with tone marks**: Hiếu (the name) is different from hiểu (to understand), so the app won't confuse them.")
+            TextField("Your name(s), comma-separated", text: $s.names, prompt: Text("Hiếu, Trung Hiếu"))
+                .textFieldStyle(.roundedBorder)
+            TextField("Other names (English name, nickname), optional", text: $s.aliases, prompt: Text("Hugh, Henry"))
+                .textFieldStyle(.roundedBorder)
+            TextField("Project words Whisper should spell right, optional", text: $s.jargon, prompt: Text("API, deploy, staging, sprint"))
+                .textFieldStyle(.roundedBorder)
+            Text("Tips: if your name is also a pronoun (Anh, Em, Chị), use your full given name (Đức Anh). If a colleague has the same name, use your full name (Trung Hiếu). Versions without tone marks are added automatically.")
+                .font(.callout).foregroundStyle(.secondary)
+            if !s.message.isEmpty {
+                Text(s.message).foregroundStyle(s.messageIsError ? .orange : .green)
+            }
+        case 2:
+            Text("Let the app hear the meeting").font(.title.bold())
+            Text("Meeting audio is copied to **BlackHole**, a free virtual audio device, through a **Multi-Output Device**, so you keep hearing the meeting while the app listens. Each item updates automatically when it's done.")
+            SetupChecklist(checker: checker, engine: engine, only: [.blackhole, .multiOutput, .output])
+            Text("Your own voice isn't captured, only what the meeting plays (other people).")
+                .font(.callout).foregroundStyle(.secondary)
+        case 3:
+            Text("Permissions and tools").font(.title.bold())
+            Text("Allow these so the app can listen and alert you.")
+            SetupChecklist(checker: checker, engine: engine, only: [.microphone, .notifications, .engine, .claude])
+        default:
+            Text("All set?").font(.title.bold())
+            SetupChecklist(checker: checker, engine: engine)
+            if checker.needSetup.isEmpty {
+                Label("Everything required is ready. Press Start listening when your meeting begins.", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+            } else {
+                Label("Some items still need setup. You can finish them later in the Setup tab.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    private func next() {
+        if step == 1 {
+            s.save(to: engine)
+            if s.listeningFor.isEmpty || (s.messageIsError && !s.message.hasPrefix("Saved")) { return }
+            checker.refresh(engine)
+        }
+        if step == titles.count - 1 { finish(); return }
+        step += 1
+    }
+}
+
 // MARK: - Floating alerts (work during Focus / Do Not Disturb and screen sharing)
 
 struct PopupCard: Identifiable {
@@ -100,7 +491,10 @@ enum Notifier {
     static func setUp() {
         let c = UNUserNotificationCenter.current()
         c.delegate = delegate
-        c.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        // Ask now only if the setup guide was already completed; otherwise the guide asks.
+        if UserDefaults.standard.bool(forKey: "setupGuideDone") {
+            c.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        }
     }
 
     static func post(title: String, subtitle: String = "", body: String) {
@@ -1059,11 +1453,26 @@ struct FlowRow: View {
 struct ContentView: View {
     @ObservedObject var engine: Engine
     @StateObject private var chat = ChatModel()
+    @StateObject private var checker = SetupChecker()
+    @AppStorage("setupGuideDone") private var setupGuideDone = false
+    @State private var showGuide = false
     @State private var tab = 0
     var body: some View {
         VStack(spacing: 0) {
             StatusBar(engine: engine)
             AudioWarning(engine: engine)
+            if !checker.needSetup.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "wrench.and.screwdriver.fill").foregroundStyle(.orange)
+                    Text("\(checker.needSetup.count) setup item(s) need attention: "
+                         + checker.needSetup.map(\.title).joined(separator: ", "))
+                        .font(.callout).lineLimit(1)
+                    Spacer()
+                    Button("Show") { tab = 3 }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .background(Color.orange.opacity(0.10))
+            }
             Divider()
             TabView(selection: $tab) {
                 LiveView(engine: engine, onAsk: { line in
@@ -1071,21 +1480,26 @@ struct ContentView: View {
                     chat.askAbout(line, engine)
                 }).tabItem { Text("Live") }.tag(0)
                 ChatView(engine: engine, chat: chat).tabItem { Text("Chat") }.tag(2)
+                SetupTab(engine: engine, checker: checker, openGuide: { showGuide = true })
+                    .tabItem { Text(checker.needSetup.isEmpty ? "Setup" : "Setup ⚠︎") }.tag(3)
                 SettingsView(engine: engine).tabItem { Text("Settings") }.tag(1)
             }
             .padding(.top, 6)
         }
         .frame(minWidth: 720, minHeight: 480)
-        .onAppear {
-            if CommandLine.arguments.contains("--autostart") { engine.start() }
-            // First run: no name yet → open Settings.
-            if let d = try? Data(contentsOf: engine.configURL),
-               let cfg = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-               let names = cfg["my_names"] as? [String], !names.isEmpty {
-                return
+        .sheet(isPresented: $showGuide) {
+            OnboardingView(engine: engine, checker: checker) {
+                setupGuideDone = true
+                showGuide = false
+                checker.refresh(engine)
             }
-            tab = 1
         }
+        .onAppear {
+            checker.refresh(engine)  // a setup pass on every launch
+            if !setupGuideDone || CommandLine.arguments.contains("--setup-guide") { showGuide = true }
+            if CommandLine.arguments.contains("--autostart") { engine.start() }
+        }
+        .onChange(of: engine.state) { checker.refresh(engine) }
     }
 }
 
