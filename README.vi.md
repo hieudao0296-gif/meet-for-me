@@ -47,6 +47,20 @@ Lần chạy đầu, app tải model Whisper (khoảng 1,6 GB) nên sẽ hơi l�
 
 ## 3. Thiết lập âm thanh (chỉ làm một lần)
 
+**Mặc định (khuyên dùng): ghi trực tiếp từ app họp.** App chỉ ghi âm thanh của các app họp bạn
+chọn (Zoom, Teams, Webex, trình duyệt…), nên YouTube hay nhạc ở app khác **không bị ghi**, và
+**không cần cài BlackHole**. Cần macOS 14.4 trở lên. Bạn chỉ cần:
+1. Chọn app họp trong **Settings → Audio source** (hoặc bước 3 của hướng dẫn thiết lập). App
+   nào đang phát âm thanh sẽ có nhãn xanh "playing now".
+2. Khi bấm Start lần đầu, macOS hỏi quyền ghi âm thanh: bấm **Allow**. Nếu lỡ bỏ qua, vào
+   **System Settings → Privacy & Security → Screen & System Audio Recording**, phần **System
+   Audio Recording Only**, rồi bật **Meet for Me**.
+
+> Trình duyệt được ghi nguyên cả trình duyệt. Nếu họp trên Chrome thì hãy xem YouTube bằng
+> trình duyệt khác (ví dụ Safari).
+
+Các mục 3.1–3.3 dưới đây chỉ cần khi bạn chọn nguồn **BlackHole device** (ghi mọi âm thanh của máy).
+
 > **Lần đầu mở app**, một **hướng dẫn thiết lập** từng bước sẽ hiện ra: đặt tên của bạn, rồi
 > kiểm tra từng mục: BlackHole, Multi-Output Device (app kiểm tra BlackHole đã được tick bên
 > trong chưa), đầu ra âm thanh của Mac, quyền Microphone và thông báo, engine và Claude CLI.
@@ -201,7 +215,8 @@ xưng "anh", gọi người hỏi là "em". Câu trả lời không nhắc đế
 | Vấn đề | Cách xử lý |
 |---|---|
 | Không thấy thông báo của macOS | Có thể đang bật **Focus / Do Not Disturb** (macOS cũng tự bật khi chia sẻ màn hình). Thẻ cảnh báo nổi của app vẫn hiện. Muốn thông báo macOS cũng hiện: thêm *Meet for Me* vào Allowed Apps của Focus. |
-| Transcript trống | Âm thanh chưa vào BlackHole. Kiểm tra mục 3.3 (Output hoặc Speaker phải là **Multi-Output Device**). App hiện dải cam khi Output sai, và gửi thông báo nếu 45 giây không có âm thanh. |
+| Transcript trống (chế độ ghi app họp) | Kiểm tra **Screen & System Audio Recording → System Audio Recording Only → Meet for Me** đang bật (sau mỗi lần build lại app, hãy tắt rồi bật lại). Kiểm tra app họp đã được tick trong **Settings → Audio source**. Xem `logs/capture.log`: `peak=0.0` nghĩa là chỉ nhận được im lặng. |
+| Transcript trống (chế độ BlackHole) | Âm thanh chưa vào BlackHole. Kiểm tra mục 3.3 (Output hoặc Speaker phải là **Multi-Output Device**). App hiện dải cam khi Output sai, và gửi thông báo nếu 45 giây không có âm thanh. |
 | Âm thanh khác (YouTube, nhạc…) cũng bị ghi | Khi Output của Mac là Multi-Output Device, mọi âm thanh trên máy đều bị ghi. Nếu dùng Zoom/Teams app, chỉ đặt **Speaker của app** là Multi-Output Device và để Output của Mac là loa, như vậy âm thanh khác sẽ không bị ghi. |
 | Không thấy giọng của chính mình | Bình thường. App chỉ nghe được người khác (Zoom không phát lại giọng của bạn). Muốn tự thử, hãy vào họp thêm bằng điện thoại và nói từ đó. |
 | App mở nhưng không nghe | Có thể chưa cấp quyền Microphone/Documents. Xem System Settings → Privacy & Security → **Microphone** và **Files and Folders**. |

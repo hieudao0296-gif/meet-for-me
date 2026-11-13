@@ -6,8 +6,15 @@ Listens to Zoom audio on your Mac, transcribes it locally with Whisper, and when
 asks *you* something, shows a macOS notification with the question and a drafted answer.
 
 ```
-Zoom -> BlackHole -> mlx-whisper (local) -> name filter -> Claude Code CLI (or Ollama) -> notification
+Meeting app (Zoom / Meet / Teams) -> app-audio capture -> mlx-whisper (local) -> name filter -> Claude -> alert
 ```
+
+**Audio source.** By default the app records **only your meeting apps** (Zoom, Teams, Webex,
+your browser…) with macOS app-audio capture (macOS 14.4+). YouTube or music in other apps
+stays out, and no BlackHole setup is needed. macOS asks once to allow *System Audio
+Recording*. A browser is captured as a whole, so play YouTube in a different browser than
+your meeting. Switch apps in Settings → Audio source, or pick *BlackHole device* to capture
+everything through a virtual device (setup below).
 
 Cost: $0 extra. Answers use your existing Claude Code login (`claude -p`).
 For a fully offline setup, use Ollama instead (see below).
@@ -26,8 +33,10 @@ and your notes to `context.md`. Both are created locally and git-ignored, as are
 
 ## One-time setup
 
-The app's setup guide walks you through all of this and checks each step. The manual
-steps are below for reference.
+The app's setup guide walks you through all of this and checks each step. With the default
+*meeting apps* source you only need step 4 (permissions: allow **System Audio Recording**
+under Privacy & Security → Screen & System Audio Recording) and step 5. Steps 1–3 are for
+the optional *BlackHole device* source.
 
 1. **Install BlackHole** (free virtual audio device; asks for your password):
    ```
@@ -190,7 +199,12 @@ Then set `"llm_backend": "ollama"` in config.json.
 
 ## Troubleshooting
 
-- **Nothing in the transcript:** the meeting audio isn't reaching BlackHole. With Zoom in a
+- **Nothing in the transcript (meeting-app capture):** check Privacy & Security → Screen &
+  System Audio Recording → *System Audio Recording Only* → Meet for Me is on (after a
+  rebuild, turn it off and on again: each local build counts as a new app). Check the meeting
+  app is ticked in Settings → Audio source ("playing now" shows next to apps making sound).
+  `logs/capture.log` shows what's captured (`peak=0.0` means silence).
+- **Nothing in the transcript (BlackHole):** the meeting audio isn't reaching BlackHole. With Zoom in a
   browser, the Mac's *Sound → Output* must be *Multi-Output Device*; with the Zoom app, Zoom's
   *Speaker* must be. The app shows an orange banner when the output is wrong, and a
   notification after 45 s without audio (`silence_warning_seconds`).

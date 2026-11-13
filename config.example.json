@@ -12,5 +12,12 @@
   "notes_file": "context.md",
   "silence_warning_seconds": 45,
   "jargon": "API, deploy, release, sprint, test",
-  "my_names": []
+  "my_names": [],
+  "audio_source": "apps",
+  "capture_apps": [
+    "us.zoom",
+    "com.microsoft.teams",
+    "com.cisco.webex",
+    "com.google.Chrome"
+  ]
 }

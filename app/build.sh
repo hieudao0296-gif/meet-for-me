@@ -8,7 +8,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 swiftc -parse-as-library -O -swift-version 5 \
-  -target arm64-apple-macos14.0 \
+  -target arm64-apple-macos14.4 \
   MeetForMe.swift -o "$APP/Contents/MacOS/MeetForMe"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -24,10 +24,12 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.4</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key>
   <string>Meet for Me reads meeting audio from BlackHole to transcribe it on this Mac.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Meet for Me records the audio of your meeting apps (Zoom, Teams, your browser) to transcribe it on this Mac.</string>
 </dict>
 </plist>
 PLIST

@@ -13,6 +13,7 @@ Usage:
   python listener.py --test-notify        # check that notifications show up
 """
 import argparse
+import contextlib
 import difflib
 import json
 import os
@@ -654,12 +655,20 @@ def single_instance_lock():
     return f  # keep the file object alive to hold the lock
 
 
-def run_live(cfg: dict) -> None:
-    import sounddevice as sd
+def run_live(cfg: dict, audio_stdin: bool = False) -> None:
+    """audio_stdin: the Mac app captures the meeting apps' audio itself (Core Audio process
+    taps) and pipes it here as raw float32 mono 16 kHz on stdin. Otherwise read a device
+    (BlackHole) with sounddevice."""
     _lock = single_instance_lock()  # noqa: F841
-    dev = find_device(cfg["audio_device"])
-    info = sd.query_devices(dev)
-    sr_in = int(info["default_samplerate"])
+    if audio_stdin:
+        sd = None
+        info = {"name": "meeting apps", "max_input_channels": 1}
+        sr_in = SR
+    else:
+        import sounddevice as sd
+        dev = find_device(cfg["audio_device"])
+        info = sd.query_devices(dev)
+        sr_in = int(info["default_samplerate"])
     print(f"Listening on '{info['name']}' @ {sr_in} Hz. Names: {cfg['my_names']}. Ctrl+C to stop.")
 
     blocks: "queue.Queue[np.ndarray]" = queue.Queue()
@@ -690,7 +699,7 @@ def run_live(cfg: dict) -> None:
             elif not warned and time.time() - last_sound > cfg["silence_warning_seconds"]:
                 warned = True
                 secs = int(time.time() - last_sound)
-                print(f"!! No audio for {secs}s: is the meeting output set to the Multi-Output Device?",
+                print(f"!! No audio for {secs}s (meeting not started, muted, or not routed).",
                       flush=True)
                 emit("audio", ok=False, silent_for=secs)
                 notify("No meeting audio", "Set Sound output (or Zoom's speaker) to "
@@ -719,8 +728,23 @@ def run_live(cfg: dict) -> None:
     lst.transcribe(np.zeros(SR, dtype=np.float32))  # warm-up so the first real line is fast
     print("Ready.", flush=True)
     emit("status", state="listening", device=info["name"], names=cfg["my_names"])
-    with sd.InputStream(device=dev, channels=min(2, info["max_input_channels"]),
-                        samplerate=sr_in, blocksize=int(sr_in * 0.1), callback=cb):
+    if audio_stdin:
+        def stdin_reader():
+            chunk = int(SR * 0.1) * 4  # 0.1 s of float32
+            src = sys.stdin.buffer
+            while True:
+                data = src.read(chunk)
+                if not data:
+                    print("Audio stream from the app ended.", flush=True)
+                    return
+                usable = len(data) - len(data) % 4
+                blocks.put(np.frombuffer(data[:usable], dtype=np.float32).copy())
+        threading.Thread(target=stdin_reader, daemon=True).start()
+        stream = contextlib.nullcontext()
+    else:
+        stream = sd.InputStream(device=dev, channels=min(2, info["max_input_channels"]),
+                                samplerate=sr_in, blocksize=int(sr_in * 0.1), callback=cb)
+    with stream:
         while True:
             try:
                 seg = segments.get(timeout=1)
@@ -811,6 +835,8 @@ def main() -> None:
     ap.add_argument("--ask-stdin", action="store_true",
                     help='(app) read {"question", "history", "meeting"} JSON from stdin')
     ap.add_argument("--events", action="store_true", help="print @@EVENT JSON lines (for the app)")
+    ap.add_argument("--audio-stdin", action="store_true",
+                    help="(app) read float32 mono 16 kHz audio from stdin instead of a device")
     args = ap.parse_args()
     global EMIT_EVENTS, NOTIFY_ENABLED
     EMIT_EVENTS = args.events
@@ -873,7 +899,7 @@ def main() -> None:
         run_file(cfg, Path(args.test_file))
     else:
         try:
-            run_live(cfg)
+            run_live(cfg, audio_stdin=args.audio_stdin)
         except KeyboardInterrupt:
             print("\nStopped.")
             emit("status", state="stopped")
