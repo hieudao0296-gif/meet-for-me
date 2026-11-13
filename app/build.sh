@@ -22,8 +22,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>MeetForMe</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.1</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>LSMinimumSystemVersion</key><string>14.4</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key>
@@ -36,5 +36,15 @@ PLIST
 
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP/Contents/Resources/"
 
-codesign --force --sign - "$APP"
+# Sign with the local "Meet for Me Local Signing" certificate when it exists, so macOS keeps
+# the app's permissions (microphone, audio recording, Documents) across rebuilds. Without it,
+# fall back to ad-hoc signing (each build then counts as a new app for permissions).
+IDENTITY="Meet for Me Local Signing"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
+  codesign --force --sign "$IDENTITY" "$APP"
+  echo "Signed with: $IDENTITY"
+else
+  codesign --force --sign - "$APP"
+  echo "Signed ad-hoc (no '$IDENTITY' certificate found; see README to create one)"
+fi
 echo "Built: $(pwd)/$APP"

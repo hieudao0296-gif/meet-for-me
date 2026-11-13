@@ -168,12 +168,30 @@ Test the answering without audio by feeding a text transcript, one line per utte
 Drag it to `/Applications` if you like. It still runs the engine from this folder
 (changeable in Settings → Engine), so keep the folder where it is.
 Rebuild after changing the Swift code with `app/build.sh`.
-After a rebuild, macOS asks again for Microphone and Documents access (the app is signed
-locally, so each build counts as a new app). Click Allow, or listening won't start.
+After a rebuild, macOS asks again for its permissions unless the app is signed with the
+local certificate (see "Keep permissions across rebuilds" below).
 `open "Meet for Me.app" --args --autostart` starts listening on launch.
 
 Only one listener runs at a time: a second copy (app or terminal) is refused,
 because two copies would answer every question twice.
+
+### Keep permissions across rebuilds (optional)
+
+macOS ties permissions (audio recording, Documents) to the app's signature. With the
+default one-off ("ad-hoc") signing, every rebuild looks like a new app and asks again.
+`app/build.sh` signs with a local certificate named **Meet for Me Local Signing** when one
+exists, and then permissions survive rebuilds. To create it once (it stays in your login
+keychain; the temporary files are deleted):
+```
+T=$(mktemp -d) && cd $T && umask 077
+printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=Meet for Me Local Signing\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' > c.cnf
+openssl req -x509 -newkey rsa:2048 -nodes -keyout k.pem -out c.pem -days 3650 -config c.cnf
+PW=$(openssl rand -hex 16); openssl pkcs12 -export -inkey k.pem -in c.pem -name "Meet for Me Local Signing" -out id.p12 -passout pass:$PW
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P "$PW" -T /usr/bin/codesign
+cd - && rm -rf $T
+```
+Then run `app/build.sh` and grant the permissions one last time. The keychain lists the
+certificate as "not trusted"; that's expected and doesn't matter for local signing.
 
 ## Run from the terminal
 

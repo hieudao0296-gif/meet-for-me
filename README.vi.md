@@ -114,8 +114,10 @@ sudo killall coreaudiod
 > Disturb**, và **bị ẩn khi bạn chia sẻ màn hình hoặc ghi hình**, nên người khác trong cuộc họp
 > không thấy được câu trả lời gợi ý của bạn. Thẻ câu hỏi giữ nguyên cho đến khi bạn bấm ✕.
 
-> Mỗi lần build lại app (`app/build.sh`), macOS coi đó là app mới và **hỏi lại hai quyền
-> trên**. Nếu không bấm Allow, app sẽ không bắt đầu nghe.
+> Mỗi lần build lại app (`app/build.sh`), macOS coi đó là app mới và **hỏi lại các quyền
+> trên**, trừ khi app được ký bằng chứng chỉ cục bộ **"Meet for Me Local Signing"**. Khi có chứng
+> chỉ này, quyền được giữ nguyên qua các lần build. Cách tạo chứng chỉ (chỉ làm một lần) có trong
+> mục *Keep permissions across rebuilds* của [README.md](README.md).
 
 ## 5. Đặt tên của bạn
 
