@@ -1,0 +1,15 @@
+# Private: meeting content and personal settings (never commit these)
+transcripts/
+answers/
+logs/
+context.md
+config.json
+
+# Local environment and build output
+.venv/
+app/build/
+samples/
+.listener.lock
+__pycache__/
+*.pyc
+.DS_Store
