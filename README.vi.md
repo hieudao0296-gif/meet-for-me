@@ -86,9 +86,12 @@ sudo killall coreaudiod
 2. macOS sẽ hỏi hai quyền. Bấm **Allow** cho cả hai:
    - **Microphone**: để đọc âm thanh từ BlackHole (app không nghe mic của bạn).
    - **Documents**: để chạy phần lõi trong thư mục `~/Documents/zoom-listener`.
-3. Cho phép **thông báo** của *Script Editor*. App gửi thông báo qua Script Editor.
-   Muốn thông báo đứng yên trên màn hình cho đến khi bạn tắt, vào System Settings →
-   Notifications → Script Editor và chọn kiểu **Alerts**.
+3. Cho phép **thông báo (Notifications)** của *Meet for Me* khi macOS hỏi.
+
+> **Cảnh báo nổi:** ngoài thông báo của macOS, app còn hiện một **thẻ cảnh báo ở góc trên bên
+> phải** màn hình (câu hỏi, câu trả lời gợi ý, nút copy). Thẻ này **vẫn hiện khi bật Focus/Do Not
+> Disturb**, và **bị ẩn khi bạn chia sẻ màn hình hoặc ghi hình**, nên người khác trong cuộc họp
+> không thấy được câu trả lời gợi ý của bạn. Thẻ câu hỏi giữ nguyên cho đến khi bạn bấm ✕.
 
 > Mỗi lần build lại app (`app/build.sh`), macOS coi đó là app mới và **hỏi lại hai quyền
 > trên**. Nếu không bấm Allow, app sẽ không bắt đầu nghe.
@@ -190,6 +193,7 @@ xưng "anh", gọi người hỏi là "em". Câu trả lời không nhắc đế
 
 | Vấn đề | Cách xử lý |
 |---|---|
+| Không thấy thông báo của macOS | Có thể đang bật **Focus / Do Not Disturb** (macOS cũng tự bật khi chia sẻ màn hình). Thẻ cảnh báo nổi của app vẫn hiện. Muốn thông báo macOS cũng hiện: thêm *Meet for Me* vào Allowed Apps của Focus. |
 | Transcript trống | Âm thanh chưa vào BlackHole. Kiểm tra mục 3.3 (Output hoặc Speaker phải là **Multi-Output Device**). App hiện dải cam khi Output sai, và gửi thông báo nếu 45 giây không có âm thanh. |
 | Không thấy giọng của chính mình | Bình thường. App chỉ nghe được người khác (Zoom không phát lại giọng của bạn). Muốn tự thử, hãy vào họp thêm bằng điện thoại và nói từ đó. |
 | App mở nhưng không nghe | Có thể chưa cấp quyền Microphone/Documents. Xem System Settings → Privacy & Security → **Microphone** và **Files and Folders**. |

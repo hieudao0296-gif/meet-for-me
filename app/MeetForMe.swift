@@ -5,6 +5,7 @@ import AppKit
 import AVFoundation
 import CoreAudio
 import SwiftUI
+import UserNotifications
 
 // MARK: - Models
 
@@ -79,6 +80,195 @@ func outputReachesBlackHole(_ name: String?) -> Bool {
     return n.contains("multi-output") || n.contains("blackhole")
 }
 
+// MARK: - Floating alerts (work during Focus / Do Not Disturb and screen sharing)
+
+struct PopupCard: Identifiable {
+    enum Kind { case question, called, mention, audio }
+    let id = UUID()
+    let kind: Kind
+    let time: String
+    let title: String
+    let body: String
+    var answer: String = ""
+    var confidence: String = ""
+}
+
+/// Sends a regular macOS notification as "Meet for Me" (backup to the floating window).
+enum Notifier {
+    static let delegate = NotifierDelegate()
+
+    static func setUp() {
+        let c = UNUserNotificationCenter.current()
+        c.delegate = delegate
+        c.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    static func post(title: String, subtitle: String = "", body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.subtitle = subtitle
+        content.body = body
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+}
+
+final class NotifierDelegate: NSObject, UNUserNotificationCenterDelegate {
+    // Show banners even while the app is in front.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler([.banner, .list, .sound])
+    }
+}
+
+/// A small always-on-top window in the top-right corner. Focus modes don't affect it, and it is
+/// excluded from screen sharing / recording so other participants never see your drafted answers.
+@MainActor
+final class PopupCenter: ObservableObject {
+    @Published var cards: [PopupCard] = []
+    private var panel: NSPanel?
+    private var host: NSHostingView<PopupStack>?
+    private var lastMention = Date.distantPast
+
+    func show(_ card: PopupCard) {
+        if card.kind == .mention {
+            // Name heard: short-lived heads-up; replaced by the question card if one follows.
+            guard Date().timeIntervalSince(lastMention) > 20 else { return }
+            lastMention = Date()
+        }
+        if card.kind == .question || card.kind == .called {
+            cards.removeAll { $0.kind == .mention }
+            NSSound(named: "Glass")?.play()
+        }
+        if card.kind == .audio { cards.removeAll { $0.kind == .audio } }
+        cards.insert(card, at: 0)
+        if cards.count > 4 { cards.removeLast(cards.count - 4) }
+        if card.kind == .mention || card.kind == .audio {
+            let id = card.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + (card.kind == .mention ? 20 : 30)) {
+                self.dismiss(id)
+            }
+        }
+        refresh()
+    }
+
+    func dismiss(_ id: UUID) {
+        cards.removeAll { $0.id == id }
+        refresh()
+    }
+
+    func clearAudioWarning() {
+        if cards.contains(where: { $0.kind == .audio }) {
+            cards.removeAll { $0.kind == .audio }
+            refresh()
+        }
+    }
+
+    private func makePanel() {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 100),
+                        styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+        p.level = .statusBar
+        p.isFloatingPanel = true
+        p.hidesOnDeactivate = false
+        p.becomesKeyOnlyIfNeeded = true
+        p.backgroundColor = .clear
+        p.isOpaque = false
+        p.hasShadow = false
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        p.sharingType = .none   // hidden from screen sharing and recordings
+        let h = NSHostingView(rootView: PopupStack(center: self))
+        p.contentView = h
+        panel = p
+        host = h
+    }
+
+    private func refresh() {
+        if cards.isEmpty { panel?.orderOut(nil); return }
+        if panel == nil { makePanel() }
+        guard let panel, let host else { return }
+        DispatchQueue.main.async {
+            let size = host.fittingSize
+            let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+            panel.setFrame(NSRect(x: screen.maxX - size.width - 12, y: screen.maxY - size.height - 12,
+                                  width: size.width, height: size.height), display: true)
+            panel.orderFrontRegardless()
+        }
+    }
+}
+
+struct PopupStack: View {
+    @ObservedObject var center: PopupCenter
+    var body: some View {
+        VStack(spacing: 8) {
+            ForEach(center.cards) { PopupCardView(card: $0, center: center) }
+        }
+        .padding(8)
+        .frame(width: 380)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct PopupCardView: View {
+    let card: PopupCard
+    let center: PopupCenter
+
+    private var icon: (String, Color) {
+        switch card.kind {
+        case .question: return ("questionmark.bubble.fill", .orange)
+        case .called: return ("person.wave.2.fill", .blue)
+        case .mention: return ("ear.fill", .secondary)
+        case .audio: return ("speaker.slash.fill", .red)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: icon.0).foregroundStyle(icon.1)
+                Text(card.title).font(.headline)
+                if !card.confidence.isEmpty {
+                    Text(card.confidence).font(.caption2.bold())
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                }
+                Spacer()
+                Text(card.time).font(.caption).foregroundStyle(.secondary)
+                Button { center.dismiss(card.id) } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.borderless).foregroundStyle(.secondary).help("Dismiss")
+            }
+            if !card.body.isEmpty {
+                Text(card.body).font(card.kind == .question ? .body.weight(.semibold) : .callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !card.answer.isEmpty {
+                Text(card.answer).font(.callout).fixedSize(horizontal: false, vertical: true)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                HStack {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(card.answer, forType: .string)
+                    } label: { Label("Copy answer", systemImage: "doc.on.doc") }
+                    Spacer()
+                    Button("Open app") { openMainWindow() }
+                }
+                .buttonStyle(.borderless).font(.caption)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(icon.1.opacity(0.5), lineWidth: 1))
+        .shadow(radius: 6, y: 2)
+    }
+
+    private func openMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.first { $0.title == "Meet for Me" }?.makeKeyAndOrderFront(nil)
+    }
+}
+
 // MARK: - Engine (runs listener.py)
 
 @MainActor
@@ -90,6 +280,7 @@ final class Engine: ObservableObject {
     @Published var lines: [TranscriptLine] = []
     @Published var alerts: [AlertItem] = []
     @Published var log: [String] = []
+    let popup = PopupCenter()
     @Published var audioOK = true            // engine heard something recently
     @Published var silentFor = 0
     @Published var outputDevice: String? = defaultOutputDeviceName()
@@ -137,7 +328,7 @@ final class Engine: ObservableObject {
     private func launch() {
         let p = Process()
         p.executableURL = python
-        p.arguments = ["-u", script.path, "--events"]
+        p.arguments = ["-u", script.path, "--events", "--quiet"]  // the app shows alerts itself
         p.currentDirectoryURL = folder
         p.environment = Engine.environment
         let pipe = Pipe()
@@ -223,10 +414,20 @@ final class Engine: ObservableObject {
             default: break
             }
         case "transcript":
-            lines.append(TranscriptLine(time: time, text: ev["text"] as? String ?? "",
-                                        mention: ev["mention"] as? Bool ?? false))
+            let mention = ev["mention"] as? Bool ?? false
+            let text = ev["text"] as? String ?? ""
+            lines.append(TranscriptLine(time: time, text: text, mention: mention))
+            if mention {
+                popup.show(PopupCard(kind: .mention, time: time, title: "Your name was mentioned", body: text))
+            }
             if lines.count > 2000 { lines.removeFirst(lines.count - 2000) }
         case "answer":
+            let q = ev["question"] as? String ?? ""
+            let a = ev["answer"] as? String ?? ""
+            let conf = ev["confidence"] as? String ?? ""
+            popup.show(PopupCard(kind: .question, time: time, title: "Question for you", body: q,
+                                 answer: a, confidence: conf))
+            Notifier.post(title: "Question for you", subtitle: q, body: a)
             alerts.insert(AlertItem(time: time,
                                     question: ev["question"] as? String ?? "",
                                     answer: ev["answer"] as? String ?? "",
@@ -236,6 +437,18 @@ final class Engine: ObservableObject {
         case "audio":
             audioOK = ev["ok"] as? Bool ?? true
             silentFor = ev["silent_for"] as? Int ?? 0
+            if audioOK {
+                popup.clearAudioWarning()
+            } else {
+                let msg = "Nothing heard for \(silentFor)s. Set the meeting's speaker (or Mac Sound → Output) to Multi-Output Device."
+                popup.show(PopupCard(kind: .audio, time: time, title: "No meeting audio", body: msg))
+                Notifier.post(title: "No meeting audio", body: msg)
+            }
+        case "called":
+            let text = ev["text"] as? String ?? ""
+            popup.show(PopupCard(kind: .called, time: time, title: "Someone called you",
+                                 body: text + "\nNo question followed yet."))
+            Notifier.post(title: "Someone called you", body: text)
         case "error":
             let msg = ev["message"] as? String ?? "Error"
             if ev["trigger"] == nil { state = .failed(msg) } else { log.append("Error: " + msg) }
@@ -244,6 +457,16 @@ final class Engine: ObservableObject {
     }
 
     func clear() { lines.removeAll(); alerts.removeAll() }
+
+    func showTestAlerts() {
+        let t = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        popup.show(PopupCard(kind: .question, time: t, title: "Question for you",
+                             body: "Bug hoàn tiền có kịp fix trước buổi demo không ạ?",
+                             answer: "Bug hoàn tiền bên anh dự kiến fix xong thứ Ba tuần sau, kịp trước buổi demo thứ Năm nhé em.",
+                             confidence: "high"))
+        Notifier.post(title: "Question for you", subtitle: "Bug hoàn tiền có kịp fix trước buổi demo không ạ?",
+                      body: "Bug hoàn tiền bên anh dự kiến fix xong thứ Ba tuần sau, kịp trước buổi demo thứ Năm nhé em.")
+    }
 
     /// Run listener.py with arguments and stdin, off the main thread (used by the chat).
     nonisolated static func run(python: URL, script: URL, folder: URL, args: [String],
@@ -868,6 +1091,14 @@ struct ContentView: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var engine: Engine?
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        Notifier.setUp()
+        if CommandLine.arguments.contains("--test-popup") {  // dev: show sample alerts
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                MainActor.assumeIsolated { self.engine?.showTestAlerts() }
+            }
+        }
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { engine?.stop() }

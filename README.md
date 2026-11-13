@@ -130,6 +130,11 @@ Test the answering without audio by feeding a text transcript, one line per utte
 
 `app/build/Meet for Me.app` is a small native front end for `listener.py`:
 
+- **Floating alerts:** a card in the top-right corner for each question (with the drafted
+  answer and a copy button), "someone called you", name mentions and "no meeting audio".
+  It shows even when Focus / Do Not Disturb is on, and it's **hidden from screen sharing
+  and recordings**, so participants never see your drafted answers. A regular notification
+  from *Meet for Me* is sent too (allow it when macOS asks; Focus can delay that one).
 - **Start / Stop** button (also in the menu bar, under the ear icon). Closing the
   window keeps it running in the menu bar.
 - **Live** tab: questions for you with drafted answers (copy button), and the live
