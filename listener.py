@@ -66,7 +66,9 @@ def load_config(path: Path) -> dict:
             cfg = json.load(f)
     cfg["my_names"] = [n for n in cfg.get("my_names", []) if n.strip()]
     cfg.setdefault("audio_device", "BlackHole 2ch")
-    cfg.setdefault("whisper_model", "mlx-community/whisper-large-v3-turbo")
+    # PhoWhisper fine-tuned for Vietnamese with English words mixed in (half the errors of
+    # whisper-large-v3-turbo on our tests, far better on English terms).
+    cfg.setdefault("whisper_model", "sangdth/phowhisper-large-vien-cs-mlx-8bit")
     cfg.setdefault("language", "vi")
     # Biases Whisper toward the right spelling (with tone marks) of names and jargon.
     cfg.setdefault("whisper_prompt", build_whisper_prompt(cfg.get("name_input") or cfg["my_names"][:2],
@@ -185,10 +187,14 @@ def mentions_me(text: str, names: list) -> bool:
             if f" {n} " in t:
                 return True
             continue
-        for w in words:
+        for i, w in enumerate(words):
             # Fuzzy only for long ASCII names; short / accented names must match exactly.
             if w == n or (len(n) >= 5 and n.isascii() and w.isascii()
                           and difflib.SequenceMatcher(None, w, n).ratio() >= 0.85):
+                return True
+            # Vocative "X ơi" is a direct call: accept the name even with a wrong tone mark
+            # (speech-to-text often writes "hiểu ơi" for "Hiếu ơi"; nobody says "hiểu ơi").
+            if i + 1 < len(words) and words[i + 1] == "ơi" and unaccented(w) == unaccented(n):
                 return True
     return False
 
@@ -470,22 +476,35 @@ class Listener:
         if self._whisper is None:
             import mlx_whisper
             self._whisper = mlx_whisper
-        out = self._whisper.transcribe(
-            audio.astype(np.float32),
-            path_or_hf_repo=self.cfg["whisper_model"],
-            language=self.cfg["language"],
-            initial_prompt=self.cfg["whisper_prompt"],
-            condition_on_previous_text=False,
-            verbose=None,
-        )
-        kept = []
-        for seg in out.get("segments", []):
-            text = seg.get("text", "").strip()
-            why = reject_reason(text, seg, self.cfg["whisper_prompt"])
-            if why:
-                print(f"   (dropped: {why}: {text[:60]!r})", flush=True)
-            else:
-                kept.append(text)
+
+        def run(temperature):
+            out = self._whisper.transcribe(
+                audio.astype(np.float32),
+                path_or_hf_repo=self.cfg["whisper_model"],
+                language=self.cfg["language"],
+                initial_prompt=self.cfg["whisper_prompt"],
+                condition_on_previous_text=False,
+                temperature=temperature,
+                verbose=None,
+            )
+            kept, reasons = [], []
+            for seg in out.get("segments", []):
+                text = seg.get("text", "").strip()
+                why = reject_reason(text, seg, self.cfg["whisper_prompt"])
+                if why:
+                    reasons.append(why)
+                    print(f"   (dropped: {why}: {text[:60]!r})", flush=True)
+                else:
+                    kept.append(text)
+            return kept, reasons
+
+        # Decode once (Whisper's default retries up to 5x on unsure audio, which made lines take
+        # 10-18 s). Only if the whole line would be thrown away as low-confidence, try once more
+        # with some sampling: that usually recovers it, and normal lines stay fast.
+        kept, reasons = run((0.0,))
+        if not kept and any(r.startswith("low confidence") for r in reasons) and len(audio) > SR:
+            print("   (retrying low-confidence line)", flush=True)
+            kept, _ = run((0.4,))
         return " ".join(kept).strip()
 
     # -- per-line handling
@@ -681,7 +700,7 @@ def run_live(cfg: dict, audio_stdin: bool = False) -> None:
     def segmenter():
         """Cut the stream into utterances on ~0.7 s of silence (max 20 s)."""
         thr = cfg["silence_threshold"]
-        pre = deque(maxlen=3)  # ~0.3 s pre-roll
+        pre = deque(maxlen=6)  # ~0.6 s pre-roll: without it the first syllable (often a name) gets clipped
         cur, silent, speaking, loud_time = [], 0.0, False, 0.0
         last_sound, warned = time.time(), False
         while True:

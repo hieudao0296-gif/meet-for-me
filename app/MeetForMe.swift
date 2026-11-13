@@ -1269,6 +1269,7 @@ final class SettingsModel: ObservableObject {
     @Published var audioSource = "apps"
     @Published var captureApps: Set<String> = Set(CaptureApp.defaults)
     @Published var language = "vi"
+    @Published var whisperModel = "sangdth/phowhisper-large-vien-cs-mlx-8bit"
     @Published var backend = "claude"
     @Published var claudeModel = "sonnet"
     @Published var ollamaModel = "qwen3:8b"
@@ -1296,6 +1297,7 @@ final class SettingsModel: ObservableObject {
         audioSource = ConfigFile.audioSource(cfg)
         captureApps = Set(ConfigFile.captureApps(cfg))
         language = (cfg["language"] as? String) ?? "auto"
+        whisperModel = cfg["whisper_model"] as? String ?? "sangdth/phowhisper-large-vien-cs-mlx-8bit"
         backend = cfg["llm_backend"] as? String ?? "claude"
         claudeModel = cfg["claude_model"] as? String ?? "sonnet"
         ollamaModel = cfg["ollama_model"] as? String ?? "qwen3:8b"
@@ -1326,6 +1328,7 @@ final class SettingsModel: ObservableObject {
         cfg["audio_source"] = audioSource
         cfg["capture_apps"] = CaptureApp.known.map(\.id).filter { captureApps.contains($0) }
         cfg["language"] = language == "auto" ? NSNull() : language
+        cfg["whisper_model"] = whisperModel
         cfg["llm_backend"] = backend
         cfg["claude_model"] = claudeModel
         cfg["ollama_model"] = ollamaModel
@@ -1600,6 +1603,17 @@ struct SettingsView: View {
                 AudioSourcePicker(s: s)
             }
             Section("Transcription") {
+                Picker("Speech model", selection: $s.whisperModel) {
+                    Text("PhoWhisper: Vietnamese + English words (recommended)")
+                        .tag("sangdth/phowhisper-large-vien-cs-mlx-8bit")
+                    Text("Whisper turbo: faster, weaker on mixed speech")
+                        .tag("mlx-community/whisper-large-v3-turbo")
+                    if !["sangdth/phowhisper-large-vien-cs-mlx-8bit", "mlx-community/whisper-large-v3-turbo"].contains(s.whisperModel) {
+                        Text(s.whisperModel).tag(s.whisperModel)
+                    }
+                }
+                Text("A model is downloaded on first use (~1.6 GB). Stop and start listening to apply.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Language", selection: $s.language) {
                     Text("Vietnamese").tag("vi")
                     Text("English").tag("en")

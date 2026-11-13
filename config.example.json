@@ -1,6 +1,6 @@
 {
   "audio_device": "BlackHole 2ch",
-  "whisper_model": "mlx-community/whisper-large-v3-turbo",
+  "whisper_model": "sangdth/phowhisper-large-vien-cs-mlx-8bit",
   "language": "vi",
   "silence_threshold": 0.006,
   "llm_backend": "claude",

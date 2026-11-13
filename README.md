@@ -27,7 +27,7 @@ git clone <this repo> ~/Documents/zoom-listener && cd ~/Documents/zoom-listener
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 app/build.sh            # builds app/build/Meet for Me.app (Command Line Tools only)
 ```
-The first run downloads the Whisper model (~1.6 GB). Your settings go to `config.json`
+The first run downloads the speech model (PhoWhisper, ~1.6 GB). Your settings go to `config.json`
 and your notes to `context.md`. Both are created locally and git-ignored, as are
 `transcripts/`, `answers/` and `logs/`. The defaults come from `config.example.json`.
 
@@ -133,10 +133,14 @@ Test the answering without audio by feeding a text transcript, one line per utte
   remove the bare `Hiếu`. Expect some false alerts otherwise.
 - Answers come back in the language of the question, using pronouns that match how you were
   addressed (anh / em / chị).
-- If accuracy isn't good enough on real meetings, try PhoWhisper (a Vietnamese fine-tune
-  of Whisper). Community MLX conversions exist on Hugging Face, e.g.
-  `sangdth/phowhisper-large-vien-cs-mlx-8bit`; set it as `whisper_model`. It's slower and
-  not tested here.
+- **Speech model:** the default is **PhoWhisper vien-cs** (`sangdth/phowhisper-large-vien-cs-mlx-8bit`),
+  VinAI's Vietnamese Whisper fine-tuned for Vietnamese with English words mixed in. On our
+  14-sentence test it made about half the errors of `whisper-large-v3-turbo` (7% vs 13% word
+  error rate) and got far more English terms right ("fix", "demo", "frontend", "API"); it's
+  about 0.6 s slower per line. Switch in Settings → Transcription → Speech model.
+  Each line is decoded once; only a line that would be dropped as low-confidence is retried.
+- **"X ơi" calls:** a word followed by "ơi" counts as your name even with a wrong tone mark
+  (speech-to-text often writes "hiểu ơi" for "Hiếu ơi"); elsewhere matching stays tone-exact.
 
 ## Mac app
 

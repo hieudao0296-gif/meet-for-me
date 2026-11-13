@@ -43,7 +43,12 @@ Lệnh cuối tạo ứng dụng **`app/build/Meet for Me.app`**. Bạn có th�
 Applications. App vẫn chạy phần lõi từ thư mục `~/Documents/zoom-listener`, nên **đừng
 di chuyển hay xoá thư mục này**.
 
-Lần chạy đầu, app tải model Whisper (khoảng 1,6 GB) nên sẽ hơi lâu.
+Lần chạy đầu, app tải model nhận dạng giọng nói (khoảng 1,6 GB) nên sẽ hơi lâu.
+
+**Model mặc định: PhoWhisper vien-cs** (của VinAI), được huấn luyện cho tiếng Việt có xen từ
+tiếng Anh ("fix cái bug", "demo", "deploy"). Trong bài kiểm tra, nó sai ít hơn khoảng một nửa so
+với Whisper turbo (7% so với 13%) và nhận đúng thuật ngữ tiếng Anh tốt hơn nhiều. Có thể đổi
+trong **Settings → Transcription → Speech model**.
 
 ## 3. Thiết lập âm thanh (chỉ làm một lần)
 
@@ -134,7 +139,8 @@ Bấm **Save**.
 Vì sao phải ghi **có dấu**? Vì tiếng Việt có nhiều từ chỉ khác nhau ở dấu: **Hiếu** (tên) khác
 **hiểu** (hiểu biết) và **hiệu** (hiệu suất). App so khớp **giữ nguyên dấu**, nên câu
 "mọi người hiểu chưa?" sẽ không bị nhầm là gọi bạn. Dạng không dấu (`Hieu`) được tự động
-thêm vào, phòng khi có người gọi tên bạn kiểu tiếng Anh.
+thêm vào, phòng khi có người gọi tên bạn kiểu tiếng Anh. Riêng khi có chữ **"ơi"** ngay sau
+(cách gọi trực tiếp), app chấp nhận tên dù sai dấu, vì máy hay nghe "Hiếu ơi" thành "hiểu ơi".
 
 Mẹo:
 - Nếu tên bạn cũng là một đại từ (**Anh**, **Em**, **Chị**…), app sẽ không chấp nhận tên
